@@ -40,4 +40,4 @@ Les réservations sont stockées dans un custom post type `reservation`. Chaque 
 - Notifications par email
 
 ## ✉️ Contact
-Auteur : [Théo Chelly](https://www.linkedin.com/in/theo-chelly/)
+Auteur : [Théo Chelly](https://www.linkedin.com/in/théo-chelly-7ab668308)

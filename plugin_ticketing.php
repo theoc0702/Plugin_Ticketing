@@ -1,6 +1,6 @@
 <?php
 /**
- * Plugin Name: Mon Booking Plugin
+ * Plugin Name: Plugin_Ticketing
  * Plugin URI: https://github.com/theoc0702/Plugin_Ticketing
  * Description: Plugin de gestion de réservations similaire à BookingPress.
  * Version: 1.0
@@ -55,7 +55,7 @@ function mbp_admin_menu() {
 add_action('admin_menu', 'mbp_admin_menu');
 
 function mbp_reservations_page() {
-    echo '<h1>Gestion des Réservations</h1>';
+    echo '<h1>Gestion des Réservations</h1>';#premiere page
 }
 
 // Création d'un shortcode pour le formulaire de réservation

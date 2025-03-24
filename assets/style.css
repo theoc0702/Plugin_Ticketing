@@ -1,0 +1,27 @@
+.mbp-form {
+    max-width: 400px;
+    margin: auto;
+    padding: 20px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    background: #f9f9f9;
+}
+
+.mbp-form input,
+.mbp-form button {
+    width: 100%;
+    padding: 10px;
+    margin: 5px 0;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+}
+
+.mbp-form button {
+    background: #0073aa;
+    color: white;
+    cursor: pointer;
+}
+
+.mbp-form button:hover {
+    background: #005580;
+}

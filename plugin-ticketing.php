@@ -2,7 +2,7 @@
 /*
 Plugin Name: Réservation et Ticketing
 Description: Plugin pour gérer les réservations, entreprises, services et utilisateurs
-Version: 1.2
+Version: 1.3
 Author: Votre Nom
 */
 
@@ -12,7 +12,7 @@ if (!defined('ABSPATH')) {
 }
 
 class ReservationTicketingPlugin {
-    private $version = '1.2';
+    private $version = '1.3';
 
     public function __construct() {
         // Hooks d'activation et de désactivation du plugin
@@ -28,6 +28,10 @@ class ReservationTicketingPlugin {
         // Gestion des actions de formulaire
         add_action('admin_post_ajouter_entreprise', array($this, 'handle_ajouter_entreprise'));
         add_action('admin_post_ajouter_service', array($this, 'handle_ajouter_service'));
+
+        // Ajout des nouveaux hooks de suppression
+        add_action('admin_post_supprimer_entreprise', array($this, 'handle_supprimer_entreprise'));
+        add_action('admin_post_supprimer_service', array($this, 'handle_supprimer_service'));
     }
 
     public function init_plugin() {
@@ -186,6 +190,7 @@ class ReservationTicketingPlugin {
                         <th>Nom</th>
                         <th>Email</th>
                         <th>Téléphone</th>
+                        <th>Actions</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -195,6 +200,15 @@ class ReservationTicketingPlugin {
                         <td><?php echo esc_html($entreprise->nom); ?></td>
                         <td><?php echo esc_html($entreprise->email); ?></td>
                         <td><?php echo esc_html($entreprise->telephone); ?></td>
+                        <td>
+                            <form action="<?php echo admin_url('admin-post.php'); ?>" method="post" 
+                                  onsubmit="return confirm('Êtes-vous sûr de vouloir supprimer cette entreprise ?');">
+                                <?php wp_nonce_field('supprimer_entreprise_nonce'); ?>
+                                <input type="hidden" name="action" value="supprimer_entreprise">
+                                <input type="hidden" name="entreprise_id" value="<?php echo esc_attr($entreprise->id); ?>">
+                                <input type="submit" value="Supprimer" class="button button-secondary">
+                            </form>
+                        </td>
                     </tr>
                     <?php endforeach; ?>
                 </tbody>
@@ -280,6 +294,7 @@ class ReservationTicketingPlugin {
                         <th>Entreprise</th>
                         <th>Durée</th>
                         <th>Prix</th>
+                        <th>Actions</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -290,6 +305,15 @@ class ReservationTicketingPlugin {
                         <td><?php echo esc_html($service->nom_entreprise); ?></td>
                         <td><?php echo esc_html($service->duree); ?> min</td>
                         <td><?php echo esc_html(number_format($service->prix, 2)); ?> €</td>
+                        <td>
+                            <form action="<?php echo admin_url('admin-post.php'); ?>" method="post" 
+                                  onsubmit="return confirm('Êtes-vous sûr de vouloir supprimer ce service ?');">
+                                <?php wp_nonce_field('supprimer_service_nonce'); ?>
+                                <input type="hidden" name="action" value="supprimer_service">
+                                <input type="hidden" name="service_id" value="<?php echo esc_attr($service->id); ?>">
+                                <input type="submit" value="Supprimer" class="button button-secondary">
+                            </form>
+                        </td>
                     </tr>
                     <?php endforeach; ?>
                 </tbody>
@@ -384,6 +408,88 @@ class ReservationTicketingPlugin {
             wp_redirect(admin_url('admin.php?page=reservations_services&message=service_added'));
         } else {
             wp_redirect(admin_url('admin.php?page=reservations_services&message=service_error'));
+        }
+        exit();
+    }
+
+    public function handle_supprimer_entreprise() {
+        // Vérification du nonce
+        check_admin_referer('supprimer_entreprise_nonce');
+
+        // Vérification des permissions
+        if (!current_user_can('manage_options')) {
+            wp_die('Vous n\'avez pas les permissions nécessaires.');
+        }
+
+        // Récupération de l'ID de l'entreprise
+        $entreprise_id = intval($_POST['entreprise_id']);
+
+        // Vérification que l'entreprise n'a pas de services associés
+        global $wpdb;
+        $services_table = $wpdb->prefix . 'reservation_services';
+        $services_count = $wpdb->get_var($wpdb->prepare(
+            "SELECT COUNT(*) FROM $services_table WHERE entreprise_id = %d", 
+            $entreprise_id
+        ));
+
+        if ($services_count > 0) {
+            wp_die('Impossible de supprimer cette entreprise car elle a des services associés.');
+        }
+
+        // Suppression de l'entreprise
+        $table_name = $wpdb->prefix . 'reservation_entreprises';
+        $resultat = $wpdb->delete(
+            $table_name,
+            array('id' => $entreprise_id),
+            array('%d')
+        );
+
+        // Redirection avec message de succès ou d'erreur
+        if ($resultat) {
+            wp_redirect(admin_url('admin.php?page=reservations_entreprises&message=entreprise_deleted'));
+        } else {
+            wp_redirect(admin_url('admin.php?page=reservations_entreprises&message=entreprise_delete_error'));
+        }
+        exit();
+    }
+
+    public function handle_supprimer_service() {
+        // Vérification du nonce
+        check_admin_referer('supprimer_service_nonce');
+
+        // Vérification des permissions
+        if (!current_user_can('manage_options')) {
+            wp_die('Vous n\'avez pas les permissions nécessaires.');
+        }
+
+        // Récupération de l'ID du service
+        $service_id = intval($_POST['service_id']);
+
+        // Vérification que le service n'a pas de réservations associées
+        global $wpdb;
+        $reservations_table = $wpdb->prefix . 'reservation_rendez_vous';
+        $reservations_count = $wpdb->get_var($wpdb->prepare(
+            "SELECT COUNT(*) FROM $reservations_table WHERE service_id = %d", 
+            $service_id
+        ));
+
+        if ($reservations_count > 0) {
+            wp_die('Impossible de supprimer ce service car il a des réservations associées.');
+        }
+
+        // Suppression du service
+        $services_table = $wpdb->prefix . 'reservation_services';
+        $resultat = $wpdb->delete(
+            $services_table,
+            array('id' => $service_id),
+            array('%d')
+        );
+
+        // Redirection avec message de succès ou d'erreur
+        if ($resultat) {
+            wp_redirect(admin_url('admin.php?page=reservations_services&message=service_deleted'));
+        } else {
+            wp_redirect(admin_url('admin.php?page=reservations_services&message=service_delete_error'));
         }
         exit();
     }

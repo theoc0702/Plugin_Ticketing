@@ -32,6 +32,12 @@ class ReservationTicketingPlugin {
         // Ajout des nouveaux hooks de suppression
         add_action('admin_post_supprimer_entreprise', array($this, 'handle_supprimer_entreprise'));
         add_action('admin_post_supprimer_service', array($this, 'handle_supprimer_service'));
+
+        //hooks de reservation
+        add_action('wp_ajax_charger_services_entreprise', array($this, 'charger_services_entreprise'));
+        add_action('admin_post_ajouter_reservation', array($this, 'handle_ajouter_reservation'));
+        add_action('admin_post_supprimer_reservation', array($this, 'handle_supprimer_reservation'));
+        add_action('admin_post_modifier_statut_reservation', array($this, 'handle_modifier_statut_reservation'));
     }
 
     public function init_plugin() {
@@ -126,15 +132,196 @@ class ReservationTicketingPlugin {
             'reservations_services', 
             array($this, 'render_services_page')
         );
+
+        // Sous-menu pour gérer les réservations
+        add_submenu_page(
+            'reservations_ticketing', 
+            'Liste des Réservations', 
+            'Liste des Réservations', 
+            'manage_options', 
+            'reservations_liste', 
+            array($this, 'render_reservations_page')
+        );
     }
 
     public function render_main_page() {
+        global $wpdb;
+        $entreprises_table = $wpdb->prefix . 'reservation_entreprises';
+        $services_table = $wpdb->prefix . 'reservation_services';
+    
+        // Récupérer la liste des entreprises
+        $entreprises = $wpdb->get_results("SELECT * FROM $entreprises_table");
         ?>
         <div class="wrap">
-            <h1>Réservations et Ticketing</h1>
-            <p>Bienvenue dans votre système de gestion de réservations.</p>
+            <h1>Réservation de service</h1>
+            
+            <div class="postbox">
+                <div class="postbox-header">
+                    <h2>Formulaire de réservation</h2>
+                </div>
+                <div class="inside">
+                    <form id="reservation-form" action="<?php echo admin_url('admin-post.php'); ?>" method="post">
+                        <?php wp_nonce_field('ajouter_reservation_nonce'); ?>
+                        <input type="hidden" name="action" value="ajouter_reservation">
+                        
+                        <table class="form-table">
+                            <tr>
+                                <th><label for="entreprise_id">Entreprise</label></th>
+                                <td>
+                                    <select name="entreprise_id" id="entreprise_id" required class="regular-text">
+                                        <option value="">Sélectionnez une entreprise</option>
+                                        <?php foreach($entreprises as $entreprise): ?>
+                                            <option value="<?php echo esc_attr($entreprise->id); ?>">
+                                                <?php echo esc_html($entreprise->nom); ?>
+                                            </option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                </td>
+                            </tr>
+                            
+                            <tr>
+                                <th><label for="service_id">Service</label></th>
+                                <td>
+                                    <select name="service_id" id="service_id" required class="regular-text" disabled>
+                                        <option value="">Sélectionnez d'abord une entreprise</option>
+                                    </select>
+                                </td>
+                            </tr>
+                            
+                            <tr>
+                                <th><label for="date_reservation">Date de réservation</label></th>
+                                <td>
+                                    <input type="datetime-local" name="date_reservation" id="date_reservation" required class="regular-text">
+                                </td>
+                            </tr>
+                            
+                            <tr>
+                                <th><label for="utilisateur_id">Utilisateur</label></th>
+                                <td>
+                                    <?php 
+                                    // Récupérer les utilisateurs WordPress
+                                    $current_user = wp_get_current_user(); 
+                                    ?>
+                                    <input type="text" value="<?php echo esc_attr($current_user->display_name); ?>" readonly class="regular-text">
+                                    <input type="hidden" name="utilisateur_id" value="<?php echo esc_attr($current_user->ID); ?>">
+                                </td>
+                            </tr>
+                        </table>
+                        
+                        <p class="submit">
+                            <input type="submit" name="submit" id="submit" class="button button-primary" value="Réserver" disabled>
+                        </p>
+                    </form>
+                </div>
+            </div>
         </div>
+    
+        <script>
+        jQuery(document).ready(function($) {
+            $('#entreprise_id').on('change', function() {
+                var entrepriseId = $(this).val();
+                var serviceSelect = $('#service_id');
+                var submitButton = $('#submit');
+    
+                // Réinitialiser le service
+                serviceSelect.html('<option value="">Chargement des services...</option>').prop('disabled', true);
+                submitButton.prop('disabled', true);
+    
+                // Requête AJAX pour charger les services de l'entreprise
+                $.ajax({
+                    url: ajaxurl,
+                    type: 'POST',
+                    data: {
+                        'action': 'charger_services_entreprise',
+                        'entreprise_id': entrepriseId
+                    },
+                    success: function(response) {
+                        if (response.success) {
+                            serviceSelect.html(response.data);
+                            serviceSelect.prop('disabled', false);
+                        } else {
+                            serviceSelect.html('<option value="">Aucun service disponible</option>');
+                        }
+                    }
+                });
+            });
+    
+            // Activer le bouton de soumission quand un service est sélectionné
+            $('#service_id').on('change', function() {
+                $('#submit').prop('disabled', $(this).val() === '');
+            });
+        });
+        </script>
         <?php
+    }
+    
+    // Fonction AJAX pour charger les services d'une entreprise
+    public function charger_services_entreprise() {
+        global $wpdb;
+        $services_table = $wpdb->prefix . 'reservation_services';
+        $entreprise_id = intval($_POST['entreprise_id']);
+    
+        $services = $wpdb->get_results($wpdb->prepare(
+            "SELECT id, nom, duree, prix FROM $services_table WHERE entreprise_id = %d",
+            $entreprise_id
+        ));
+    
+        $options = '<option value="">Sélectionnez un service</option>';
+        foreach ($services as $service) {
+            $options .= sprintf(
+                '<option value="%d">%s (Durée: %d min, Prix: %.2f €)</option>',
+                $service->id, 
+                esc_html($service->nom), 
+                $service->duree, 
+                $service->prix
+            );
+        }
+    
+        wp_send_json_success($options);
+    }
+    
+    // Méthode pour gérer l'ajout de réservation
+    public function handle_ajouter_reservation() {
+        // Vérification du nonce
+        check_admin_referer('ajouter_reservation_nonce');
+    
+        // Vérification des permissions - ici on vérifie simplement si l'utilisateur est connecté
+        if (!is_user_logged_in()) {
+            wp_die('Vous devez être connecté pour effectuer une réservation.');
+        }
+    
+        // Récupération et assainissement des données
+        $service_id = intval($_POST['service_id']);
+        $utilisateur_id = get_current_user_id();
+        $date_reservation = sanitize_text_field($_POST['date_reservation']);
+    
+        // Validation des données
+        if (empty($service_id) || empty($date_reservation)) {
+            wp_die('Veuillez remplir tous les champs obligatoires.');
+        }
+    
+        // Ajout de la réservation
+        global $wpdb;
+        $table_name = $wpdb->prefix . 'reservation_rendez_vous';
+        
+        $resultat = $wpdb->insert(
+            $table_name,
+            array(
+                'service_id' => $service_id,
+                'utilisateur_id' => $utilisateur_id,
+                'date_reservation' => $date_reservation,
+                'statut' => 'en_attente'
+            ),
+            array('%d', '%d', '%s', '%s')
+        );
+    
+        // Redirection avec message de succès ou d'erreur
+        if ($resultat) {
+            wp_redirect(admin_url('admin.php?page=reservations_ticketing&message=reservation_added'));
+        } else {
+            wp_redirect(admin_url('admin.php?page=reservations_ticketing&message=reservation_error'));
+        }
+        exit();
     }
 
     public function render_entreprises_page() {
@@ -493,6 +680,194 @@ class ReservationTicketingPlugin {
         }
         exit();
     }
+
+    public function render_reservations_page() {
+        global $wpdb;
+        $reservations_table = $wpdb->prefix . 'reservation_rendez_vous';
+        $services_table = $wpdb->prefix . 'reservation_services';
+    
+        // Requête modifiée pour récupérer les réservations avec jointure
+        $query = $wpdb->prepare(
+            "SELECT r.id, r.date_reservation, r.statut, 
+                    s.nom as service_nom, 
+                    r.utilisateur_id
+             FROM $reservations_table r
+             LEFT JOIN $services_table s ON r.service_id = s.id
+             ORDER BY r.date_reservation DESC"
+        );
+        $reservations = $wpdb->get_results($query);
+    
+        // Débogage
+        if ($wpdb->last_error) {
+            echo "<div class='error'><p>Erreur de base de données : " . esc_html($wpdb->last_error) . "</p></div>";
+        }
+    
+        ?>
+        <div class="wrap">
+            <h1>Liste des Réservations</h1>
+            
+            <?php if (empty($reservations)): ?>
+                <div class="notice notice-warning">
+                    <p>Aucune réservation trouvée.</p>
+                </div>
+            <?php else: ?>
+                <table class="wp-list-table widefat fixed striped">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Service</th>
+                            <th>ID Utilisateur</th>
+                            <th>Date de réservation</th>
+                            <th>Statut</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach($reservations as $reservation): ?>
+                        <tr>
+                            <td><?php echo esc_html($reservation->id); ?></td>
+                            <td><?php echo esc_html($reservation->service_nom ?? 'Service supprimé'); ?></td>
+                            <td><?php echo esc_html($reservation->utilisateur_id); ?></td>
+                            <td><?php echo esc_html($reservation->date_reservation); ?></td>
+                            <td>
+                                <?php 
+                                switch($reservation->statut) {
+                                    case 'en_attente':
+                                        echo '<span class="badge badge-warning">En attente</span>';
+                                        break;
+                                    case 'confirmé':
+                                        echo '<span class="badge badge-success">Confirmé</span>';
+                                        break;
+                                    case 'annulé':
+                                        echo '<span class="badge badge-danger">Annulé</span>';
+                                        break;
+                                    default:
+                                        echo esc_html($reservation->statut);
+                                }
+                                ?>
+                            </td>
+                            <td>
+                                <div class="reservation-actions">
+                                    <form action="<?php echo admin_url('admin-post.php'); ?>" method="post" 
+                                          style="display:inline-block; margin-right:10px;">
+                                        <?php wp_nonce_field('modifier_statut_reservation_nonce'); ?>
+                                        <input type="hidden" name="action" value="modifier_statut_reservation">
+                                        <input type="hidden" name="reservation_id" value="<?php echo esc_attr($reservation->id); ?>">
+                                        <select name="nouveau_statut" onchange="this.form.submit()">
+                                            <option value="en_attente" <?php selected($reservation->statut, 'en_attente'); ?>>En attente</option>
+                                            <option value="confirmé" <?php selected($reservation->statut, 'confirmé'); ?>>Confirmé</option>
+                                            <option value="annulé" <?php selected($reservation->statut, 'annulé'); ?>>Annulé</option>
+                                        </select>
+                                    </form>
+    
+                                    <form action="<?php echo admin_url('admin-post.php'); ?>" method="post" 
+                                          style="display:inline-block;"
+                                          onsubmit="return confirm('Êtes-vous sûr de vouloir supprimer cette réservation ?');">
+                                        <?php wp_nonce_field('supprimer_reservation_nonce'); ?>
+                                        <input type="hidden" name="action" value="supprimer_reservation">
+                                        <input type="hidden" name="reservation_id" value="<?php echo esc_attr($reservation->id); ?>">
+                                        <input type="submit" value="Supprimer" class="button button-secondary button-small">
+                                    </form>
+                                </div>
+                            </td>
+                        </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            <?php endif; ?>
+    
+            <!-- Débogage supplémentaire -->
+            <div style="margin-top: 20px; background-color: #f4f4f4; padding: 10px; border: 1px solid #ddd;">
+                <h3>Informations de débogage</h3>
+                <p><strong>Nombre de réservations :</strong> <?php echo count($reservations); ?></p>
+                <pre><?php print_r($reservations); ?></pre>
+            </div>
+        </div>
+        <style>
+        .badge {
+            display: inline-block;
+            padding: 0.25em 0.5em;
+            border-radius: 0.25rem;
+        }
+        .badge-warning {
+            background-color: #ffc107;
+            color: #212529;
+        }
+        .badge-success {
+            background-color: #28a745;
+            color: white;
+        }
+        .badge-danger {
+            background-color: #dc3545;
+            color: white;
+        }
+        </style>
+        <?php
+    }
+
+    public function handle_modifier_statut_reservation() {
+        // Vérification du nonce
+        check_admin_referer('modifier_statut_reservation_nonce');
+    
+        // Vérification des permissions
+        if (!current_user_can('manage_options')) {
+            wp_die('Vous n\'avez pas les permissions nécessaires.');
+        }
+    
+        // Récupération des données
+        $reservation_id = intval($_POST['reservation_id']);
+        $nouveau_statut = sanitize_text_field($_POST['nouveau_statut']);
+    
+        // Mise à jour du statut
+        global $wpdb;
+        $table_name = $wpdb->prefix . 'reservation_rendez_vous';
+        
+        $resultat = $wpdb->update(
+            $table_name,
+            array('statut' => $nouveau_statut),
+            array('id' => $reservation_id),
+            array('%s'),
+            array('%d')
+        );
+    
+        // Redirection avec message de succès ou d'erreur
+        if ($resultat) {
+            wp_redirect(admin_url('admin.php?page=reservations_liste&message=statut_updated'));
+        } else {
+            wp_redirect(admin_url('admin.php?page=reservations_liste&message=statut_update_error'));
+        }
+        exit();
+    }
+    
+    public function handle_supprimer_reservation() {
+        // Vérification du nonce
+        check_admin_referer('supprimer_reservation_nonce');
+    
+        // Vérification des permissions
+        if (!current_user_can('manage_options')) {
+            wp_die('Vous n\'avez pas les permissions nécessaires.');
+        }
+    
+        // Récupération de l'ID de la réservation
+        $reservation_id = intval($_POST['reservation_id']);
+    
+        // Suppression de la réservation
+        global $wpdb;
+        $table_name = $wpdb->prefix . 'reservation_rendez_vous';
+        $resultat = $wpdb->delete(
+            $table_name,
+            array('id' => $reservation_id),
+            array('%d')
+        );
+    
+        // Redirection avec message de succès ou d'erreur
+        if ($resultat) {
+            wp_redirect(admin_url('admin.php?page=reservations_liste&message=reservation_deleted'));
+        } else {
+            wp_redirect(admin_url('admin.php?page=reservations_liste&message=reservation_delete_error'));
+        }
+        exit();
+    }
 }
 
 // Initialisation du plugin
@@ -500,3 +875,4 @@ function initialiser_reservation_ticketing() {
     new ReservationTicketingPlugin();
 }
 add_action('plugins_loaded', 'initialiser_reservation_ticketing');
+
